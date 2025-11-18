@@ -1,0 +1,14 @@
+# Environment variables (NEVER commit credentials)
+.env
+
+# State files
+.state.json
+*.log
+
+# Backup files
+*.bak
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
