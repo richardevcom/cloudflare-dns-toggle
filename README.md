@@ -1,7 +1,9 @@
 # Cloudflare DNS Proxy Toggle
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Cloudflare Status](https://img.shields.io/badge/CF-Status-orange.svg)](https://www.cloudflarestatus.com/)
+[![Bash](https://img.shields.io/badge/bash-4.0+-green.svg)](https://www.gnu.org/software/bash/)
+[![Cloudflare](https://img.shields.io/badge/Cloudflare-API-orange.svg)](https://developers.cloudflare.com/api/)
+[![Status Page](https://img.shields.io/badge/Status-Monitor-blue.svg)](https://www.cloudflarestatus.com/)
 
 Auto-detects Cloudflare outages and toggles DNS proxy to keep domains accessible. When CF throws 500/502/503 errors, script disables proxy (grey cloud) to route direct to origin. Re-enables when healthy.
 
