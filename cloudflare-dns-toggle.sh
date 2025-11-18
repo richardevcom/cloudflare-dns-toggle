@@ -227,21 +227,21 @@ check_domain_health() {
     # Origin errors: 520-527 (CF couldn't reach origin)
     if [[ "$http_code" =~ ^(520|521|522|523|524|525|526|527)$ ]]; then
         # Origin server issue - don't toggle, this won't help
-        echo "origin-down"
+        echo "origin-down|$http_code"
     elif [[ "$http_code" =~ ^(500|502|503)$ ]] && [[ -n "$has_cf_ray" ]]; then
         # Check if it's CF-branded error (CF network issue) or origin error passing through
         if echo "$headers_and_body" | grep -qi "cloudflare"; then
-            echo "cf-down"  # Cloudflare network issue - toggle will help
+            echo "cf-down|$http_code"  # Cloudflare network issue - toggle will help
         else
-            echo "origin-down"  # Origin returning 500 - toggle won't help
+            echo "origin-down|$http_code"  # Origin returning 500 - toggle won't help
         fi
     elif [[ "$http_code" == "000" ]]; then
-        echo "unreachable"
+        echo "unreachable|000"
     elif [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
-        echo "up"
+        echo "up|$http_code"
     else
         # Other errors (4xx, etc.) - site is "working" from CF perspective
-        echo "up"
+        echo "up|$http_code"
     fi
 }
 
@@ -406,29 +406,35 @@ monitor_domains() {
     
     while true; do
         for domain in "${domains[@]}"; do
-            local health
-            health=$(check_domain_health "$domain")
+            local health_result
+            health_result=$(check_domain_health "$domain")
+            local health_status="${health_result%%|*}"
+            local http_code="${health_result##*|}"
             
-            case "$health" in
+            case "$health_status" in
                 "cf-down")
-                    log_warn "⚠️  $domain - Cloudflare network error detected"
+                    log_warn "⚠️  $domain - Cloudflare network error (HTTP $http_code)"
                     if [[ "$AUTO_TOGGLE" == "true" ]]; then
                         log_info "Disabling proxy to bypass CF..."
                         toggle_domain "$domain" "disable"
                     fi
                     ;;
                 "origin-down")
-                    log_error "✗ $domain - Origin server error (520-527 or 500 from origin)"
+                    log_error "✗ $domain - Origin server error (HTTP $http_code)"
                     log_info "Not toggling proxy - issue is with origin server, not Cloudflare"
                     ;;
                 "up")
-                    log_info "✓ $domain is UP"
+                    if [[ "$http_code" == "200" ]]; then
+                        log_info "✓ $domain - OK (HTTP $http_code)"
+                    else
+                        log_info "✓ $domain - Responding (HTTP $http_code)"
+                    fi
                     if [[ "$AUTO_TOGGLE" == "true" ]]; then
                         toggle_domain "$domain" "enable"
                     fi
                     ;;
                 "unreachable")
-                    log_error "✗ $domain is UNREACHABLE"
+                    log_error "✗ $domain - Unreachable (connection failed)"
                     ;;
             esac
             
@@ -543,13 +549,63 @@ main() {
     case "$command" in
         check)
             for domain in "${domains[@]}"; do
-                local health
-                health=$(check_domain_health "$domain")
-                case "$health" in
-                    "up") echo -e "${GREEN}✓${NC} $domain is UP" ;;
-                    "cf-down") echo -e "${RED}✗${NC} $domain - Cloudflare network error" ;;
-                    "origin-down") echo -e "${YELLOW}⚠${NC} $domain - Origin server error (not CF)" ;;
-                    "unreachable") echo -e "${YELLOW}?${NC} $domain is UNREACHABLE" ;;
+                # Get proxy status first
+                local zone_id="${CF_ZONE_ID:-}"
+                if [[ -z "$zone_id" ]]; then
+                    zone_id=$(get_zone_id_from_domain "$domain" 2>/dev/null)
+                fi
+                
+                local proxy_status="unknown"
+                if [[ -n "$zone_id" ]]; then
+                    local record
+                    record=$(get_record_by_name "$zone_id" "$domain" 2>/dev/null)
+                    local proxied
+                    proxied=$(echo "$record" | jq -r '.result[0].proxied // "unknown"')
+                    if [[ "$proxied" == "true" ]]; then
+                        proxy_status="🟠 proxied"
+                    elif [[ "$proxied" == "false" ]]; then
+                        proxy_status="☁️  direct"
+                    fi
+                fi
+                
+                # Get health status
+                local health_result
+                health_result=$(check_domain_health "$domain")
+                local health_status="${health_result%%|*}"
+                local http_code="${health_result##*|}"
+                
+                # Build status message
+                case "$health_status" in
+                    "up")
+                        if [[ "$http_code" == "200" ]]; then
+                            echo -e "${GREEN}✓${NC} $domain [$proxy_status] - OK (HTTP $http_code)"
+                        elif [[ "$http_code" =~ ^40[134]$ ]]; then
+                            local msg="Forbidden"
+                            [[ "$http_code" == "404" ]] && msg="Not Found"
+                            [[ "$http_code" == "401" ]] && msg="Unauthorized"
+                            echo -e "${YELLOW}⚠${NC} $domain [$proxy_status] - $msg (HTTP $http_code)"
+                        else
+                            echo -e "${GREEN}✓${NC} $domain [$proxy_status] - Responding (HTTP $http_code)"
+                        fi
+                        ;;
+                    "cf-down")
+                        echo -e "${RED}✗${NC} $domain [$proxy_status] - Cloudflare network error (HTTP $http_code)"
+                        ;;
+                    "origin-down")
+                        local origin_msg="Origin server error"
+                        [[ "$http_code" == "520" ]] && origin_msg="Origin returned empty response"
+                        [[ "$http_code" == "521" ]] && origin_msg="Origin refused connection"
+                        [[ "$http_code" == "522" ]] && origin_msg="Origin connection timeout"
+                        [[ "$http_code" == "523" ]] && origin_msg="Origin unreachable"
+                        [[ "$http_code" == "524" ]] && origin_msg="Origin timeout"
+                        [[ "$http_code" == "525" ]] && origin_msg="SSL handshake failed"
+                        [[ "$http_code" == "526" ]] && origin_msg="Invalid SSL certificate"
+                        [[ "$http_code" == "527" ]] && origin_msg="Railgun error"
+                        echo -e "${YELLOW}⚠${NC} $domain [$proxy_status] - $origin_msg (HTTP $http_code)"
+                        ;;
+                    "unreachable")
+                        echo -e "${RED}✗${NC} $domain [$proxy_status] - Unreachable (connection failed)"
+                        ;;
                 esac
             done
             ;;
