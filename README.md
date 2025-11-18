@@ -5,7 +5,7 @@
 
 Auto-detects Cloudflare outages and toggles DNS proxy to keep domains accessible. When CF throws 500/502/503 errors, script disables proxy (grey cloud) to route direct to origin. Re-enables when healthy.
 
-Built during the Nov 18, 2025 CF outage.
+Built during the [Nov 18, 2025 CF outage incident](https://www.cloudflarestatus.com/incidents/8gmgl950y3h7).
 
 ## Setup
 
@@ -83,6 +83,12 @@ LOG_FILE=/var/log/cloudflare-dns-toggle.log
 ```
 
 ## Security
+
+```bash
+# Secure permissions
+chmod 600 .env              # Only owner can read/write
+chmod 700 cloudflare-dns-toggle.sh  # Only owner can execute
+```
 
 - Never commit `.env` (already in `.gitignore`)
 - Use API tokens, not Global API Key
