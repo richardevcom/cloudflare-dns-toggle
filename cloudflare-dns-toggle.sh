@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 STATE_FILE="${SCRIPT_DIR}/.state.json"
 DEFAULT_CHECK_INTERVAL=60
-DEFAULT_LOG_FILE="/tmp/cloudflare-dns-toggle.log"
+DEFAULT_LOG_FILE="${SCRIPT_DIR}/cloudflare-dns-toggle.log"
 
 # Colors for output
 RED='\033[0;31m'
@@ -147,13 +147,34 @@ get_zone_id_from_domain() {
     local domain="$1"
     local base_domain
     
-    # Extract base domain (e.g., example.com from www.example.com)
-    base_domain=$(echo "$domain" | awk -F. '{print $(NF-1)"."$NF}')
-    
+    # Try full domain first (for exact match)
     local response
-    response=$(cf_api_call "GET" "/zones?name=${base_domain}")
+    response=$(cf_api_call "GET" "/zones?name=${domain}" 2>/dev/null)
+    local zone_id
+    zone_id=$(echo "$response" | jq -r '.result[0].id // empty')
     
-    echo "$response" | jq -r '.result[0].id // empty'
+    if [[ -n "$zone_id" ]]; then
+        echo "$zone_id"
+        return 0
+    fi
+    
+    # Extract base domain for subdomains (e.g., nurmebeer.com from brewing.nurmebeer.com)
+    # Handle multi-level: sub.domain.com -> domain.com, sub.domain.co.uk -> domain.co.uk
+    if [[ "$domain" =~ \. ]]; then
+        # Get last 2 parts (handles most TLDs)
+        base_domain=$(echo "$domain" | awk -F. '{print $(NF-1)"."$NF}')
+        
+        response=$(cf_api_call "GET" "/zones?name=${base_domain}" 2>/dev/null)
+        zone_id=$(echo "$response" | jq -r '.result[0].id // empty')
+        
+        if [[ -n "$zone_id" ]]; then
+            echo "$zone_id"
+            return 0
+        fi
+    fi
+    
+    # Not found
+    return 1
 }
 
 get_dns_records() {

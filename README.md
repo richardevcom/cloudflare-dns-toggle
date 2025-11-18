@@ -81,7 +81,7 @@ CF_API_TOKEN=your_token
 # CF_ZONE_ID=your_zone_id  # Optional - auto-detected from domain
 CHECK_INTERVAL=60      # seconds
 AUTO_TOGGLE=true
-LOG_FILE=/var/log/cloudflare-dns-toggle.log
+LOG_FILE=./cloudflare-dns-toggle.log  # local dir (or /var/log/ for system-wide)
 ```
 
 Verify your token:
