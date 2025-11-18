@@ -17,6 +17,7 @@ ENV_FILE="${SCRIPT_DIR}/.env"
 STATE_FILE="${SCRIPT_DIR}/.state.json"
 DEFAULT_CHECK_INTERVAL=60
 DEFAULT_LOG_FILE="${SCRIPT_DIR}/cloudflare-dns-toggle.log"
+QUIET_MODE=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -35,7 +36,14 @@ log() {
     local msg="$*"
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "${timestamp} [${level}] ${msg}" | tee -a "${LOG_FILE:-$DEFAULT_LOG_FILE}" >&2
+    
+    # Always log to file
+    echo "${timestamp} [${level}] ${msg}" >> "${LOG_FILE:-$DEFAULT_LOG_FILE}"
+    
+    # Only output to stderr if not in quiet mode
+    if [[ "$QUIET_MODE" != "true" ]]; then
+        echo "${timestamp} [${level}] ${msg}" >&2
+    fi
 }
 
 log_info() { log "INFO" "$@"; }
@@ -399,10 +407,14 @@ toggle_domain() {
 monitor_domains() {
     local domains=("$@")
     
-    echo -e "${BLUE}Starting monitor mode...${NC}"
-    echo -e "Check interval: ${CHECK_INTERVAL}s"
-    echo -e "Domains: ${domains[*]}"
-    echo -e "Press Ctrl+C to stop\n"
+    if [[ "$QUIET_MODE" != "true" ]]; then
+        echo -e "${BLUE}Starting monitor mode...${NC}"
+        echo -e "Check interval: ${CHECK_INTERVAL}s"
+        echo -e "Domains: ${domains[*]}"
+        echo -e "Press Ctrl+C to stop\n"
+    fi
+    
+    log_info "Monitor started for domains: ${domains[*]}"
     
     while true; do
         for domain in "${domains[@]}"; do
@@ -413,28 +425,25 @@ monitor_domains() {
             
             case "$health_status" in
                 "cf-down")
-                    log_warn "⚠️  $domain - Cloudflare network error (HTTP $http_code)"
+                    log_warn "$domain - Cloudflare network error (HTTP $http_code)"
                     if [[ "$AUTO_TOGGLE" == "true" ]]; then
                         log_info "Disabling proxy to bypass CF..."
                         toggle_domain "$domain" "disable"
                     fi
                     ;;
                 "origin-down")
-                    log_error "✗ $domain - Origin server error (HTTP $http_code)"
-                    log_info "Not toggling proxy - issue is with origin server, not Cloudflare"
+                    log_error "$domain - Origin server error (HTTP $http_code)"
                     ;;
                 "up")
-                    if [[ "$http_code" == "200" ]]; then
-                        log_info "✓ $domain - OK (HTTP $http_code)"
-                    else
-                        log_info "✓ $domain - Responding (HTTP $http_code)"
+                    if [[ "$QUIET_MODE" != "true" ]] || [[ "$http_code" != "200" && "$http_code" != "301" && "$http_code" != "302" ]]; then
+                        log_info "$domain - OK (HTTP $http_code)"
                     fi
                     if [[ "$AUTO_TOGGLE" == "true" ]]; then
                         toggle_domain "$domain" "enable"
                     fi
                     ;;
                 "unreachable")
-                    log_error "✗ $domain - Unreachable (connection failed)"
+                    log_error "$domain - Unreachable (connection failed)"
                     ;;
             esac
             
@@ -465,7 +474,7 @@ After=network.target
 Type=simple
 User=${USER}
 WorkingDirectory=${SCRIPT_DIR}
-ExecStart=${SCRIPT_DIR}/cloudflare-dns-toggle.sh monitor ${domains}
+ExecStart=${SCRIPT_DIR}/cloudflare-dns-toggle.sh monitor --quiet ${domains}
 Restart=always
 RestartSec=10
 
@@ -492,7 +501,7 @@ EOF
 
 show_usage() {
     cat << EOF
-Usage: $(basename "$0") <command> [domains...]
+Usage: $(basename "$0") <command> [options] [domains...]
 
 Commands:
   check [domains...]   Check health status of domains
@@ -503,12 +512,17 @@ Commands:
   restore [domains...] Restore original proxy settings
   install-service      Install systemd service for auto-monitoring
 
+Options:
+  -q, --quiet         Quiet mode (minimal output, logs only errors/changes)
+  -h, --help          Show this help message
+
 If no domains specified, interactive selection will be shown.
 
 Examples:
   $(basename "$0") check example.com
   $(basename "$0") disable example.com www.example.com
-  $(basename "$0") monitor
+  $(basename "$0") monitor --quiet
+  $(basename "$0") monitor -q example.com
   $(basename "$0") install-service
 
 Environment:
@@ -527,20 +541,34 @@ main() {
     local command="$1"
     shift
     
-    # Commands that don't need env
-    case "$command" in
-        help|-h|--help)
-            show_usage
-            exit 0
-            ;;
-    esac
+    # Parse options
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -q|--quiet)
+                QUIET_MODE=true
+                shift
+                ;;
+            -h|--help|help)
+                show_usage
+                exit 0
+                ;;
+            -*)
+                echo -e "${RED}Unknown option: $1${NC}" >&2
+                show_usage
+                exit 1
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
     
     check_dependencies
     load_env
     
     # Get domains
     local domains=()
-    if [[ $# -eq 0 ]]; then
+    if [[ $# -eq 0 ]] && [[ "$command" != "install-service" ]]; then
         mapfile -t domains < <(select_domains)
     else
         domains=("$@")

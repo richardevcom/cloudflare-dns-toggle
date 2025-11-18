@@ -39,10 +39,17 @@ chmod +x cloudflare-dns-toggle.sh
 # Monitor mode (auto-toggle every 60s)
 ./cloudflare-dns-toggle.sh monitor example.com
 
+# Quiet mode (minimal output, logs only errors/changes)
+./cloudflare-dns-toggle.sh monitor --quiet example.com
+./cloudflare-dns-toggle.sh monitor -q example.com
+
+# Background with nohup
+nohup ./cloudflare-dns-toggle.sh monitor -q example.com &
+
 # Interactive mode (pick domains from DNS records)
 ./cloudflare-dns-toggle.sh monitor
 
-# Install as systemd service
+# Install as systemd service (runs in quiet mode)
 ./cloudflare-dns-toggle.sh install-service
 
 # Rollback to original state
@@ -88,6 +95,30 @@ Verify your token:
 ```bash
 curl "https://api.cloudflare.com/client/v4/user/tokens/verify" \
   -H "Authorization: Bearer your_api_token_here"
+```
+
+## Background Monitoring
+
+**Option 1: nohup (simple)**
+```bash
+nohup ./cloudflare-dns-toggle.sh monitor -q domain1.com domain2.com &
+tail -f cloudflare-dns-toggle.log
+# Stop: pkill -f cloudflare-dns-toggle
+```
+
+**Option 2: systemd service (production)**
+```bash
+./cloudflare-dns-toggle.sh install-service domain1.com domain2.com
+sudo systemctl status cloudflare-dns-toggle
+sudo journalctl -u cloudflare-dns-toggle -f
+```
+
+**Option 3: screen/tmux**
+```bash
+screen -S cf-monitor
+./cloudflare-dns-toggle.sh monitor -q domain1.com domain2.com
+# Detach: Ctrl+A then D
+# Reattach: screen -r cf-monitor
 ```
 
 ## Security
