@@ -208,16 +208,39 @@ update_proxy_status() {
 
 check_domain_health() {
     local domain="$1"
+    local response
+    
+    # Get both status code and headers
+    response=$(curl -sS -w "\n%{http_code}\n" -H "User-Agent: cloudflare-dns-toggle/1.0" \
+        --max-time 10 "https://${domain}" 2>&1 || echo -e "\n000\n")
+    
     local http_code
+    http_code=$(echo "$response" | tail -n 1)
+    local headers_and_body
+    headers_and_body=$(echo "$response" | head -n -1)
     
-    # Try to reach the domain and check for CF error
-    http_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "https://${domain}" 2>/dev/null || echo "000")
+    # Check for CF-RAY header (indicates request went through CF)
+    local has_cf_ray
+    has_cf_ray=$(echo "$headers_and_body" | grep -i "cf-ray:" || echo "")
     
-    if [[ "$http_code" == "500" ]] || [[ "$http_code" == "502" ]] || [[ "$http_code" == "503" ]]; then
-        echo "down"
+    # Cloudflare network errors: 500/502/503 WITH CF branding
+    # Origin errors: 520-527 (CF couldn't reach origin)
+    if [[ "$http_code" =~ ^(520|521|522|523|524|525|526|527)$ ]]; then
+        # Origin server issue - don't toggle, this won't help
+        echo "origin-down"
+    elif [[ "$http_code" =~ ^(500|502|503)$ ]] && [[ -n "$has_cf_ray" ]]; then
+        # Check if it's CF-branded error (CF network issue) or origin error passing through
+        if echo "$headers_and_body" | grep -qi "cloudflare"; then
+            echo "cf-down"  # Cloudflare network issue - toggle will help
+        else
+            echo "origin-down"  # Origin returning 500 - toggle won't help
+        fi
     elif [[ "$http_code" == "000" ]]; then
         echo "unreachable"
+    elif [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+        echo "up"
     else
+        # Other errors (4xx, etc.) - site is "working" from CF perspective
         echo "up"
     fi
 }
@@ -387,11 +410,16 @@ monitor_domains() {
             health=$(check_domain_health "$domain")
             
             case "$health" in
-                "down")
-                    log_warn "⚠️  $domain is DOWN (CF error detected)"
+                "cf-down")
+                    log_warn "⚠️  $domain - Cloudflare network error detected"
                     if [[ "$AUTO_TOGGLE" == "true" ]]; then
+                        log_info "Disabling proxy to bypass CF..."
                         toggle_domain "$domain" "disable"
                     fi
+                    ;;
+                "origin-down")
+                    log_error "✗ $domain - Origin server error (520-527 or 500 from origin)"
+                    log_info "Not toggling proxy - issue is with origin server, not Cloudflare"
                     ;;
                 "up")
                     log_info "✓ $domain is UP"
@@ -519,7 +547,8 @@ main() {
                 health=$(check_domain_health "$domain")
                 case "$health" in
                     "up") echo -e "${GREEN}✓${NC} $domain is UP" ;;
-                    "down") echo -e "${RED}✗${NC} $domain is DOWN (CF error)" ;;
+                    "cf-down") echo -e "${RED}✗${NC} $domain - Cloudflare network error" ;;
+                    "origin-down") echo -e "${YELLOW}⚠${NC} $domain - Origin server error (not CF)" ;;
                     "unreachable") echo -e "${YELLOW}?${NC} $domain is UNREACHABLE" ;;
                 esac
             done
