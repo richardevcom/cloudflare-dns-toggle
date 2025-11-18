@@ -1,14 +1,27 @@
-# Environment variables (NEVER commit credentials)
+# Secrets & credentials (NEVER commit)
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
 
-# State files
+# State & logs
 .state.json
 *.log
+*.log.*
 
-# Backup files
+# Backups & temp files
 *.bak
+*.tmp
+*.swp
 *~
 
 # OS files
 .DS_Store
 Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
