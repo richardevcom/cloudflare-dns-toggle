@@ -129,10 +129,6 @@ chmod 600 .env              # Only owner can read/write
 chmod 700 cloudflare-dns-toggle.sh  # Only owner can execute
 ```
 
-- Never commit `.env` (already in `.gitignore`)
-- Use API tokens, not Global API Key
-- Script never echoes credentials
-
 ## License
 
 MIT - [richardevcom](https://github.com/richardevcom)
