@@ -15,13 +15,13 @@ Built during the [Nov 18, 2025 CF outage incident](https://www.cloudflarestatus.
 git clone git@github.com:richardevcom/cloudflare-dns-toggle.git
 cd cloudflare-dns-toggle
 cp .env.example .env
-# Edit .env with your CF_API_TOKEN and CF_ZONE_ID
+# Edit .env with your CF_API_TOKEN (CF_ZONE_ID is optional)
 chmod +x cloudflare-dns-toggle.sh
 ```
 
 **Get credentials:**
 - API Token: https://dash.cloudflare.com/profile/api-tokens (needs `Zone.DNS Edit`)
-- Zone ID: CF Dashboard → domain → Overview (right sidebar)
+- Zone ID: Optional - auto-detected from domain (or set manually in CF Dashboard → Overview)
 
 ## Usage
 
@@ -78,10 +78,16 @@ Install: `sudo apt install curl jq` (Ubuntu/Debian) or `brew install curl jq` (m
 Edit `.env`:
 ```bash
 CF_API_TOKEN=your_token
-CF_ZONE_ID=your_zone_id
+# CF_ZONE_ID=your_zone_id  # Optional - auto-detected from domain
 CHECK_INTERVAL=60      # seconds
 AUTO_TOGGLE=true
 LOG_FILE=/var/log/cloudflare-dns-toggle.log
+```
+
+Verify your token:
+```bash
+curl "https://api.cloudflare.com/client/v4/user/tokens/verify" \
+  -H "Authorization: Bearer your_api_token_here"
 ```
 
 ## Security

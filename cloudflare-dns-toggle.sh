@@ -97,7 +97,8 @@ load_env() {
     
     # Validate required variables
     : "${CF_API_TOKEN:?CF_API_TOKEN not set in .env}"
-    : "${CF_ZONE_ID:?CF_ZONE_ID not set in .env}"
+    
+    # CF_ZONE_ID is optional - will auto-detect from domain if not set
     
     # Set defaults
     CHECK_INTERVAL="${CHECK_INTERVAL:-$DEFAULT_CHECK_INTERVAL}"
@@ -140,6 +141,19 @@ cf_api_call() {
     fi
     
     echo "$body"
+}
+
+get_zone_id_from_domain() {
+    local domain="$1"
+    local base_domain
+    
+    # Extract base domain (e.g., example.com from www.example.com)
+    base_domain=$(echo "$domain" | awk -F. '{print $(NF-1)"."$NF}')
+    
+    local response
+    response=$(cf_api_call "GET" "/zones?name=${base_domain}")
+    
+    echo "$response" | jq -r '.result[0].id // empty'
 }
 
 get_dns_records() {
@@ -192,6 +206,12 @@ check_domain_health() {
 # ============================================================================
 
 select_domains() {
+    if [[ -z "${CF_ZONE_ID:-}" ]]; then
+        log_error "CF_ZONE_ID not set and cannot auto-discover without domain"
+        echo -e "${YELLOW}Provide domain as argument or set CF_ZONE_ID in .env${NC}"
+        exit 4
+    fi
+    
     local records
     records=$(get_dns_records "$CF_ZONE_ID")
     
@@ -274,9 +294,21 @@ toggle_domain() {
     
     log_info "Processing domain: $domain"
     
+    # Auto-detect zone if not set
+    local zone_id="${CF_ZONE_ID:-}"
+    if [[ -z "$zone_id" ]]; then
+        log_info "Auto-detecting zone for $domain..."
+        zone_id=$(get_zone_id_from_domain "$domain")
+        if [[ -z "$zone_id" ]]; then
+            log_error "Could not find zone for $domain"
+            return 4
+        fi
+        log_info "Detected zone: $zone_id"
+    fi
+    
     # Get DNS record
     local record
-    record=$(get_record_by_name "$CF_ZONE_ID" "$domain")
+    record=$(get_record_by_name "$zone_id" "$domain")
     
     if [[ $(echo "$record" | jq -r '.result | length') -eq 0 ]]; then
         log_error "Domain not found: $domain"
@@ -311,7 +343,7 @@ toggle_domain() {
     
     # Apply change
     log_info "Toggling proxy for $domain: $current_proxied → $target_proxied"
-    update_proxy_status "$CF_ZONE_ID" "$record_id" "$target_proxied"
+    update_proxy_status "$zone_id" "$record_id" "$target_proxied"
     
     echo -e "${GREEN}✓ Updated $domain (proxied=$target_proxied)${NC}"
 }
@@ -483,8 +515,15 @@ main() {
             ;;
         status)
             for domain in "${domains[@]}"; do
+                # Auto-detect zone if not set
+                local zone_id="${CF_ZONE_ID:-}"
+                if [[ -z "$zone_id" ]]; then
+                    zone_id=$(get_zone_id_from_domain "$domain")
+                    [[ -z "$zone_id" ]] && { log_error "Zone not found for $domain"; continue; }
+                fi
+                
                 local record
-                record=$(get_record_by_name "$CF_ZONE_ID" "$domain")
+                record=$(get_record_by_name "$zone_id" "$domain")
                 local proxied
                 proxied=$(echo "$record" | jq -r '.result[0].proxied')
                 if [[ "$proxied" == "true" ]]; then
