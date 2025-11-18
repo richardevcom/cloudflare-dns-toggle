@@ -78,7 +78,7 @@ AGENT: "Which API call? Show me:
 **Citation Format:**
 ```
 ✅ "According to Cloudflare API docs (dns-records-for-a-zone-list-dns-records), parameter..."
-✅ "Based on codebase (toggle-proxy.sh:42), current implementation..."
+✅ "Based on codebase (cloudflare-dns-toggle.sh:42), current implementation..."
 ✅ "API endpoint requires Zone ID - see https://developers.cloudflare.com/api/"
 ❌ "I think the endpoint should be..." (NO speculation)
 ```
@@ -202,6 +202,7 @@ curl $ENDPOINT
 ├── .env.example                      # Environment template
 ├── .env                              # Actual credentials (gitignored)
 ├── .state.json                       # State file (gitignored)
+├── .copilotignore                    # Protect secrets from AI context
 ├── README.md                         # Usage documentation
 ├── LICENSE                           # MIT License
 └── .gitignore                        # Ignore .env, .state.json, *.log
@@ -292,31 +293,7 @@ fi
 6. **Rate limit itself** (sleep between bulk requests)
 7. **Rollback capability** (save state before changes)
 
-## 📚 Documentation Requirements
-
-### README.md Must Include:
-```markdown
-## Prerequisites
-- curl, jq installed
-- Cloudflare API Token with DNS Edit permissions
-
-## Setup
-1. Copy .env.example to .env
-2. Add your CF_API_TOKEN and CF_ZONE_ID
-3. chmod +x toggle-cf-proxy.sh
-
-## Usage
-./toggle-cf-proxy.sh enable example.com
-./toggle-cf-proxy.sh disable example.com
-./toggle-cf-proxy.sh status example.com
-./toggle-cf-proxy.sh --dry-run enable example.com
-
-## Error Codes
-1 - Missing dependencies
-2 - Invalid credentials
-3 - API error
-4 - Domain not found
-```
+## 🏗️ Project Architecture
 
 ## ❓ Common Patterns
 
